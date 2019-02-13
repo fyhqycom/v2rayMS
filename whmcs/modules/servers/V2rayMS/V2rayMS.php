@@ -1,18 +1,16 @@
 <?php
 function initializesql(array $params)
 {
-	$query['CREATE_ACCOUNT'] = 'INSERT INTO `user`(`email`,`uuid`,`u`,`d`,`transfer_enable`,`created_at`,`updated_at`,`need_reset`,`sid`) VALUES (:email,:uuid,0,0,:transfer_enable,UNIX_TIMESTAMP(),0,:need_reset,:sid)';
+	$query['CREATE_ACCOUNT'] = 'INSERT INTO `user`(`uuid`,`uplink`,`downlink`,`transfer_enable`,`created_at`,`updated_at`,`need_reset`,`sid`) VALUES (:uuid,0,0,:transfer_enable,UNIX_TIMESTAMP(),0,:need_reset,:sid)';
 	$query['ALREADY_EXISTS'] = 'SELECT `uuid` FROM `user` WHERE `sid` = :sid';
 	$query['ENABLE'] = 'UPDATE `user` SET `enable` = :enable WHERE `sid` = :sid';
 	$query['DELETE_ACCOUNT'] = 'DELETE FROM `user` WHERE `sid` = :sid';
-	$query['CHANGE_PASSWORD'] = 'UPDATE `user` SET uuid = :uuid, email = :email WHERE `sid` = :sid';
-	$query['USERINFO'] = 'SELECT `id`,`email`,`uuid`,`t`,`u`,`d`,`transfer_enable`,`enable`,`created_at`,`updated_at`,`need_reset`,`sid` FROM `user` WHERE `sid` = :sid';
-	$query['RESET'] = 'UPDATE `user` SET `u` = 0,`d` = 0 WHERE `sid` = :sid';
+	$query['CHANGE_PASSWORD'] = 'UPDATE `user` SET uuid = :uuid WHERE `sid` = :sid';
+	$query['USERINFO'] = 'SELECT `id`,`uuid`,`usetime`,`uplink`,`downlink`,`transfer_enable`,`enable`,`created_at`,`updated_at`,`need_reset`,`sid` FROM `user` WHERE `sid` = :sid';
+	$query['RESET'] = 'UPDATE `user` SET `uplink` = 0,`downlink` = 0 WHERE `sid` = :sid';
 	$query['CHANGE_PACKAGE'] = 'UPDATE `user` SET `transfer_enable` = :transfer_enable WHERE `sid` = :sid';
-	$query['SELECT_EMAIL'] = 'SELECT `email` FROM `user` WHERE `email` = :email';
 	return $query;
 }
-// 生成UUID
 function uuid($prefix = '')
 {
 	$chars = md5(uniqid(mt_rand(), true));
@@ -22,17 +20,6 @@ function uuid($prefix = '')
 	$uuid .= substr($chars,16,4) . '-';
 	$uuid .= substr($chars,20,12);
 	return $prefix . $uuid;
-}
-function create_email($length = 16)
-{
-	$chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';  
-	$email_name = '';
-	$domain = 'npist.com';
-	for ( $i = 0; $i < $length; $i++ )  
-	{
-	$email_name .= $chars[ mt_rand(0, strlen($chars) - 1) ];
-	}
-	return $email_name . '@' . $domain;  
 }
 function convert_tran($number, $from, $to)
 {
@@ -87,7 +74,7 @@ function V2rayMS_ConfigOptions()
 		'Description' => '是否需要重置流量'
 		),
 	'流量限制' => array('Type' => 'text', 'Size' => '25', 'Description' => '单位MB'),
-	'线路列表' => array('Type' => 'textarea', 'Rows' => '3', 'Cols' => '50', 'Description' => '格式 xxx|端口|服务器地址|AlterID|传输协议|伪装混淆| 一行一个')
+	'线路列表' => array('Type' => 'textarea', 'Rows' => '3', 'Cols' => '50', 'Description' => '格式:线路名称|服务器地址|端口|AlterID|传输协议|伪装混淆| 一行一个')
 	);
 }
 function V2rayMS_TestConnection(array $params)
@@ -123,25 +110,13 @@ function V2rayMS_CreateAccount(array $params)
 			return 'User already exists.';
 		}
 		$bandwidth = (!empty($params['configoption3']) ? convert_tran($params['configoption3'], 'mb', 'bytes') : (!empty($params['configoptions']['traffic']) ? convert_tran($params['configoptions']['traffic'], 'gb', 'bytes') : '1099511627776'));
-		while (true){
-			$user_email = create_email();
-			$select_email = $db->prepare($query['SELECT_EMAIL']);
-			$select_email->bindValue('email', $user_email);
-			$select_email->execute();
-			if($select_email->fetchColumn()){
-				continue;
-			}
-			else{
-				break;
-			}
-		}
 		$create = $db->prepare($query['CREATE_ACCOUNT']);
 		$create->bindValue(':uuid', uuid());
 		$create->bindValue(':transfer_enable', $bandwidth);
-		$create->bindValue(':email', $user_email);
 		$create->bindValue(':need_reset', $params['configoption2']);
 		$create->bindValue(':sid', $params['serviceid']);
 		$create = $create->execute();
+
 		if ($create) {
 			return 'success';
 			}
@@ -218,13 +193,11 @@ function V2rayMS_TerminateAccount(array $params)
 		$already->bindValue(':sid', $params['serviceid']);
 		$already->execute();
 		$already = $already->fetch();
-		if ($already) {
-			
+		if ($already) {	
 		}
 		else {
 			return 'User does not exists.';
 		}
-
 		$enable = $db->prepare($query['DELETE_ACCOUNT']);
 		$enable->bindValue(':sid', $params['serviceid']);
 		
@@ -274,21 +247,8 @@ function V2rayMS_ChangePassword(array $params)
 		$dbuser = $params['serverusername'];
 		$dbpass = $params['serverpassword'];
 		$db = new PDO('mysql:host=' . $dbhost . ';dbname=' . $dbname, $dbuser, $dbpass);
-		while (true){
-			$user_email = create_email();
-			$select_email = $db->prepare($query['SELECT_EMAIL']);
-			$select_email->bindValue('email', $user_email);
-			$select_email->execute();
-			if($select_email->fetchColumn()){
-				continue;
-			}
-			else{
-				break;
-			}
-		}
 		$enable = $db->prepare($query['CHANGE_PASSWORD']);
 		$enable->bindValue(':uuid', uuid());
-		$enable->bindValue(':email', $user_email);
 		$enable->bindValue(':sid', $params['serviceid']);
 		$todo = $enable->execute();
 		if (!$todo) {
@@ -350,7 +310,7 @@ function V2rayMS_ClientArea(array $params)
 			$results[$x/6][$x%6] = $node[$x];
 			$x++;
 		}
-		$user = array('uuid' => $usage['uuid'], 'u' => $usage['u'], 'd' => $usage['d'], 't' => $usage['t'], 'sum' => $usage['u'] + $usage['d'], 'transfer_enable' => $usage['transfer_enable'], 'created_at' => $usage['created_at'], 'updated_at' => $usage['updated_at']);
+		$user = array('uuid' => $usage['uuid'], 'u' => $usage['uplink'], 'd' => $usage['downlink'], 't' => $usage['usetime'], 'sum' => $usage['uplink'] + $usage['downlink'], 'transfer_enable' => $usage['transfer_enable'], 'created_at' => $usage['created_at'], 'updated_at' => $usage['updated_at']);
 		if ($usage && $usage['enable']) {
 			return array(
 	'tabOverviewReplacementTemplate' => 'details.tpl',
@@ -384,7 +344,7 @@ function V2rayMS_AdminServicesTabFields(array $params)
 		$userinfo->execute();
 		$userinfo = $userinfo->fetch();
 		if ($userinfo) {
-			return array('UUID' => $userinfo['uuid'], '识别ID' => $userinfo['email'], '总流量' => convert_tran($userinfo['transfer_enable'], 'bytes', 'mb') . 'MB', '已用上传' => round(convert_tran($userinfo['u'], 'bytes', 'mb')) . 'MB', '已用下载' => round(convert_tran($userinfo['d'], 'bytes', 'mb')) . 'MB', '已用总量' => round(convert_tran($userinfo['d'] + $userinfo['u'], 'bytes', 'mb')) . 'MB', '最后使用' => date('Y-m-d H:i:s', $userinfo['t']), '上次重置' => date('Y-m-d H:i:s', $userinfo['updated_at']));
+			return array('UUID' => $userinfo['uuid'], '总流量' => convert_tran($userinfo['transfer_enable'], 'bytes', 'mb') . 'MB', '已用上传' => round(convert_tran($userinfo['uplink'], 'bytes', 'mb')) . 'MB', '已用下载' => round(convert_tran($userinfo['downlink'], 'bytes', 'mb')) . 'MB', '已用总量' => round(convert_tran($userinfo['downlink'] + $userinfo['uplink'], 'bytes', 'mb')) . 'MB', '最后使用' => date('Y-m-d H:i:s', $userinfo['usetime']), '上次重置' => date('Y-m-d H:i:s', $userinfo['updated_at']));
 		}
 	}
 	catch (Exception $e) {
